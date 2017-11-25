@@ -2,6 +2,7 @@ require "ruby_simple_search/version"
 require "ruby_simple_search/like_pattern"
 require "ruby_simple_search/errors"
 require "active_support/concern"
+require "byebug"
 
 module RubySimpleSearch
 
@@ -36,10 +37,10 @@ module RubySimpleSearch
 
 
       if options[:attributes].nil?
-        sql_query_values, sql_query_condition = search_attributes(@simple_search_attributes, patterned_text)
+        sql_query_values, sql_query_condition = search_attributes(@simple_search_attributes, patterned_text, search_term)
       else
         attr = *options[:attributes]
-        sql_query_values, sql_query_condition = search_attributes(attr, patterned_text)
+        sql_query_values, sql_query_condition = search_attributes(attr, patterned_text, search_term)
       end
 
       if block.is_a? Proc
@@ -89,18 +90,33 @@ module RubySimpleSearch
       [sql_query_values, sql_query_condition]
     end
 
-    def set_sql_query_condition(attr, sql_query_condition)
-      return "LOWER(#{self.table_name}.#{attr.to_s}) LIKE ?" if sql_query_condition.blank?
-      " OR LOWER(#{self.table_name}.#{attr.to_s}) LIKE ?"
+    def set_sql_query_condition(attr, sql_query_condition, patterned_text, search_term)
+      if [:string, :text].include?(self.columns_hash[attr.to_s].type)
+        condition = if sql_query_condition.blank?
+                      "LOWER(#{self.table_name}.#{attr.to_s}) LIKE ?"
+                    else
+                      " OR LOWER(#{self.table_name}.#{attr.to_s}) LIKE ?"
+                    end
+        [condition, patterned_text]
+      else
+        condition = if sql_query_condition.blank?
+                      "#{self.table_name}.#{attr.to_s} = ?"
+                    else
+                      " OR #{self.table_name}.#{attr.to_s} = ?"
+                    end
+        [condition, search_term]
+      end
     end
 
-    def search_attributes(attributes, patterned_text)
+    def search_attributes(attributes, patterned_text, search_term)
       sql_query_condition = ""
       sql_query_values = []
 
       attributes.each do |attr|
-        sql_query_condition << set_sql_query_condition(attr, sql_query_condition)
-        sql_query_values << patterned_text
+        condition, needed_search_term = set_sql_query_condition(attr, sql_query_condition, patterned_text, search_term)
+
+        sql_query_condition << condition
+        sql_query_values << needed_search_term
       end
 
       [sql_query_values, sql_query_condition]
